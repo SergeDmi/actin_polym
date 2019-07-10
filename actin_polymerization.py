@@ -8,6 +8,7 @@ from numpy import *
 import sys
 import yaml
 import pandas as pd
+import time
 
 __VERSION__ = "0.0.2"
 
@@ -52,6 +53,17 @@ __VERSION__ = "0.0.2"
     $ ./actin_polymerization.py
     $ ./actin_polymerization.py config.cym
 
+# OUTPUT :
+    The output is a CSV file res.csv with the organization (with the aforementioned config file) :
+    ,Tmax,N_monomers,box,success_frac,f0,f0.position,f0.orientation,f0.length,f1,f1.position,f1.orientation,f1.length
+    ,1000,100000,"[150, 120, 120]",1.0,2847,"[60, 19]","[1, 0]",50,3688,"[60, 20]","[1, 0]",100
+
+    In which the columns f0 and f1 yields the number of successful polymerization events for filaments f0 and f1 respectively
+
+# @TODO :
+    Implement change of length with polymerization (better simulation of diffusion limited growth)
+    Implement an export for length(t)
+
 """
 
 
@@ -75,6 +87,8 @@ class Integrator:
         """ Initializes the integrator and the system """
         # First initializing the system
         self.system.initialize(*args,**kwargs)
+        random.seed(int(time.time()))
+
 
         # Now we prepare the integrator using info from the config file
         config_sim=self.config['simulation']
@@ -280,17 +294,17 @@ class Filament:
     def make_coordinates(self):
         coords=[]
         dir=self.orientation
-        if sum(dir)==2:
+        if abs(sum(dir))==2:
             # DOUBLE RESOLUTION !
-            if dir[0]>0:
+            if abs(dir[0])>0:
                 for x in range(-1,4):
                     for y in range(-1,2):
                         coords.append([x,y])
             else:
                 for x in range(-1,2):
-                    for y in range(-3,2):
+                    for y in range(-1,4):
                         coords.append([x,y])
-        elif sum(dir==1):
+        elif abs(sum(dir))==1:
             # Simple resolution, 1 filament = 2 protofilaments
             coords.append([0,0])
             coords.append(dir)
