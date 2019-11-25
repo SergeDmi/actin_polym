@@ -1,0 +1,19 @@
+simulation:
+    Tmax: 1000
+    N_monomers: 100000
+    box: [140,120,120]
+    success_frac: 1.0
+filaments:
+    f0:
+        position: [60,19]
+        orientation: [1,0]
+        length: 20
+    f1:
+        position: [60,20]
+        orientation: [1,0]
+        length: 70
+    f2:
+        position: [60,21]
+        orientation: [1,0]
+        length: 120
+
