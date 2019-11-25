@@ -41,6 +41,18 @@ filaments:
 success_frac : success rate of the polymerization reaction, from 0 to 1  
 
 ### Filament orientation
-Values for orientation can be : [0,0] (single protofilament), [1,0] or [0,1] (two protofilaments, horizontal or vertical), [2,0] or [0,2] (two protofilaments, horizontal or vertical, with a diffusion grid of a half monomer in size).
+Values for orientation can be :
+
+#### Single protofilament  
+[0,0]
+
+#### Two protofilaments :  
+ [1,0] : horizontal  
+ [0,1] : vertical   
+
+ #### Two prototfilaments, diffusion grid size : half monomer :  
+ [2,0] : horizontal  
+ [0,2] : vertical   
+
 
 # Serge Dmitrieff -- http://biophysics.fr
