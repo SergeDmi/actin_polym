@@ -1,12 +1,14 @@
+#!/usr/bin/env python3
 ####### PACKAGES
 import math
 from numpy import *
 import pandas as pd
 import sys,os
-#from statistical_tools import multilinear_regression as linfit
 
+# @TODO : make array from string : make recurent
 
 def make_array_from_str(value):
+    # Makes an array from a string
     i=value.find('[')
     j=value.find(']')
     value=value[i+1:j]
@@ -14,78 +16,122 @@ def make_array_from_str(value):
     return array([float(val) for val in elements])
 
 def compute_dist_from_row(row):
-	pos1=make_array_from_str(row['f1.position'])
-	pos2=make_array_from_str(row['f2.position'])
-	ori1=make_array_from_str(row['f1.orientation'])
-	ori2=make_array_from_str(row['f2.orientation'])
+    # Computes distance between two filaments f0 and f1
+    pos1=make_array_from_str(row['f0.position'])
+    pos2=make_array_from_str(row['f1.position'])
+    ori1=make_array_from_str(row['f0.orientation'])
+    ori2=make_array_from_str(row['f1.orientation'])
+    return distance(pos1,ori1,pos2,ori2)
 
-	return distance(pos1,ori1,pos2,ori2)
-
+def compute_volume_from_row(row):
+    # Computes volume from box sizes
+    box=make_array_from_str(row['box'])
+    return box[0]*box[1]*box[2]
 
 def compute_ratio_from_row(row):
-	#pos1=make_array_from_str(row['f1.position'])
-	#pos2=make_array_from_str(row['f2.position'])
-	#ori1=make_array_from_str(row['f1.orientation'])
-	#ori1=make_array_from_str(row['f2.orientation'])
+    # Computes ratio of reaction events
+    return row['f0']/row['f1']
 
-	return row['f1']/row['f2']
+def distance(pos1,ori1,pos2,ori2):
+    # Actually computes distance between two filaments
+    # Normalizes the distance in units of monomer size
+    m1=pos1+get_offset_from_orientation(ori1)
+    m2=pos2+get_offset_from_orientation(ori2)-m1
+    return sqrt(m2[0]**2.0+m2[1]**2.0)/sqrt(ori1[0]**2.0+ori1[1]**2.0)
 
-def  distance(pos1,ori1,pos2,ori2):
-	m1=ori1/2.0
-	m2=(2*(pos2-pos1)+ori2)/2.0-m1
-	return sqrt(m2[0]**2.0+m2[1]**2.0)
-
+def get_offset_from_orientation(ori):
+    # offset between filament position and filament center (depends on orientation)
+    bori=abs(ori)
+    if sum(bori)==2:
+        if bori[0]==2:
+            return array([1.5,-0.5])
+        else:
+            return array([0.5,-1.5])
+    else:
+        if bori[0]==2.0:
+            return array([0.5,0])
+        else:
+            return array([0,-0.5])
 
 
 if __name__=="__main__":
-	args=sys.argv[1:]
-	options=[]
-	folders=[]
+    """
+        summary_diffusion.py : arranges the results from several simulations
 
-	for arg in args:
-		if arg.find('=')>0:
-			options.append(arg)
-		else:
-			folders.append(arg)
+        USAGE :
+        python summary_diffusion.py folder [FOLDERS] [name=NAME] [-sort KEY [KEYS]]
 
-	res_name='res.csv'
-	for opt in options:
-		if opt.startswith('name='):
-			res_name=opt[5:]
+        EXAMPLES :
+        python summary_diffusion.py run* name=res.csv
 
-	fname=os.path.join(folders[0],res_name)
+        Makes a summary of the res.csv files in folders run*
 
-	nf=len(folders)
-	ex_data=pd.read_csv(fname,squeeze=True, index_col=0)
-	keys=ex_data.columns.to_list()
-	datas=pd.DataFrame(columns=keys)
+        python summary_diffusion.py run* name=res.csv sort=distance sort=volume
 
-	for folder in folders:
-		fname=os.path.join(folder,res_name)
-		ex_data=pd.read_csv(fname,squeeze=True,index_col=0)
-		ex_data.index=[os.path.basename(folder)]
-		#index=[os.path.basename(folder)]
-		datas=datas.append(ex_data,)
-		#fname.name=os.path.basename(folder)
+        Makes a summary of the res.csv files in folders run*
+        Outputs results sorted by distance in by_distances.csv
+        Outputs results sorted by volume in by_volumes.csv
 
-	datas['distance']=datas.apply(lambda row: compute_dist_from_row(row), axis=1)
-	datas['ratio']=datas.apply(lambda row: compute_ratio_from_row(row), axis=1)
-	# Now we create stuff
-	dists=sort(unique(datas['distance'].to_numpy()))
-	nd=len(dists)
-	keys=['distance','fil1','fil2','ratio','std_n1','std_n2','std_ratio','n']
-	by_dist=pd.DataFrame(columns=keys)
+    """
+    args=sys.argv[1:]
+    options=[]
+    folders=[]
+    to_sort=[]
 
-	for i,dist in enumerate(dists):
-		select=datas[datas['distance']==dist]
-		n1=select['f1'].to_numpy()
-		n2=select['f2'].to_numpy()
-		ratio=select['ratio'].to_numpy()
-		data={ 'distance' : dist , 'fil1' : mean(n1) , 'fil2' : mean(n2) , 'ratio' : mean(ratio) , 'std_n1' : std(n1) , 'std_n2' : std(n2) , 'std_ratio' : std(ratio), 'n':len(n1) }
-		by_dist.loc[i]=data
+    for arg in args:
+        if arg.find('=')>0:
+            options.append(arg)
+        elif arg.startswith('-'):
+            options.append(arg)
+        else:
+            folders.append(arg)
 
-	# Exporting gathered  file
-	export_file='export.csv'
-	datas.to_csv(export_file)
-	dist_file='by_distances.csv'
-	by_dist.to_csv(dist_file)
+    # Name of the global output file
+    res_name='res.csv'
+    for opt in options:
+        if opt.startswith('name='):
+            res_name=opt[5:]
+        if opt.startswith('sort='):
+            to_sort.append(opt[5:])
+
+    # Checking what's in the results to prepare pandas datagrame
+    fname=os.path.join(folders[0],res_name)
+    ex_data=pd.read_csv(fname,squeeze=True, index_col=0)
+    keys=ex_data.columns.to_list()
+    datas=pd.DataFrame(columns=keys)
+
+    # Reading all folders and assembling the dataframe
+    nf=len(folders)
+    for folder in folders:
+        fname=os.path.join(folder,res_name)
+        ex_data=pd.read_csv(fname,squeeze=True,index_col=0)
+        ex_data.index=[os.path.basename(folder)]
+        datas=datas.append(ex_data,)
+
+
+    # Specific measurements derived from dataframe values
+    datas['distance']=datas.apply(lambda row: compute_dist_from_row(row), axis=1)
+    datas['volume']=datas.apply(lambda row: compute_volume_from_row(row), axis=1)
+    datas['ratio']=datas.apply(lambda row: compute_ratio_from_row(row), axis=1)
+
+    # Exporting gathered  file
+    export_file='export.csv'
+    datas.to_csv(export_file)
+
+    # Now we sort data with keys defined by user ! Exciting !
+    for key in to_sort:
+        choices=sort(unique(datas[key].to_numpy()))
+        keys=[key,'fil1','fil2','ratio','std_n1','std_n2','std_ratio','n']
+        summary=pd.DataFrame(columns=keys)
+
+        for i,choice in enumerate(choices):
+            select=datas[datas[key]==choice]
+            n1=select['f0'].to_numpy()
+            n2=select['f1'].to_numpy()
+            ratio=select['ratio'].to_numpy()
+            data={ key : choice , 'fil1' : mean(n1) , 'fil2' : mean(n2) , 'ratio' : mean(ratio) , 'std_n1' : std(n1) , 'std_n2' : std(n2) , 'std_ratio' : std(ratio), 'n':len(n1) }
+            summary.loc[i]=data
+
+
+        summary_file='by_%ss.csv' %key
+        summary.to_csv(summary_file)

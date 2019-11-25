@@ -25,6 +25,8 @@ __VERSION__ = "0.0.2"
     - Double filaments : orientation = [1,0] or [0,1]
     - Double filaments with a diffusion lattice half of the monomer size : orientation = [2,0] or [0,2]
 
+    The position of a filament is that of its TOP LEFT corner.
+
 # SYNTAX
     $ ./actin_polymerization.py [CONFIG_FILE] [OPTIONS]
 
@@ -49,6 +51,8 @@ __VERSION__ = "0.0.2"
 # OPTIONS
     See config file ; no other options available for now.
 
+    The position of the filament is the position of the top left corner in the yz plane
+
 # EXAMPLES :
     $ ./actin_polymerization.py
     $ ./actin_polymerization.py config.cym
@@ -62,7 +66,7 @@ __VERSION__ = "0.0.2"
 
 # @TODO :
     Implement change of length with polymerization (better simulation of diffusion limited growth)
-    Implement an export for length(t)
+    Implement an export for length(t) (or at least length(Tend) )
 
 """
 
@@ -166,6 +170,7 @@ class System:
         self.box_size[:]=self.box[:]+1
         self.success_frac=conf['success_frac']
         self.positions=zeros((0,3),dtype= int16)
+        self.arange=arange(self.N_monomers)
 
 
     def initialize(self,*args,**kwargs):
@@ -202,7 +207,29 @@ class System:
 
     def random_position_inside(self,*args,N=1,**kwargs):
         # Returns an array of random positions inside the box !
-        return hstack( (self.randcol_in(N=N,axis=0),self.randcol_in(N=N,axis=1),self.randcol_in(N=N,axis=2) ) )
+        #   Now avoids the filaments
+        # Warning : most of the times, this is called with very very few N :
+        # probably not performance limiting
+        done=0
+        left=self.arange[0:N]
+        pos=zeros((N,3),dtype=int16)
+        to_do=N
+
+        while to_do:
+            # We assume no monomer is on a filament
+            on=full((to_do, ), False, dtype=bool)
+            # We make random positions for monomers
+            pos[left,:]=hstack( (self.randcol_in(N=to_do,axis=0),self.randcol_in(N=to_do,axis=1),self.randcol_in(N=to_do,axis=2) ) )
+            # we check if any monomer is on a filament
+            for i,filament in enumerate(self.filaments):
+                for fil in filament.big_fil:
+                    on+=array(sum([sum(pos[left,1:3]==fil[left,:],axis=1)==2 for fil in filament.big_fil ],axis=0)*(pos[left,0]<filament.length),dtype=bool)
+            # we select monomers that are actually on a filament
+            left=left[on]
+            to_do=len(left)
+
+        return pos
+
 
     def randcol_in(self,N=1,axis=0):
         # Return a random of ints between 0 and box_size[axis]
@@ -228,6 +255,7 @@ class System:
             self.counts[i]=N
             # Collision detection
             self.on[:]= sum([sum(self.positions[:,1:3]==fil,axis=1)==2 for fil in filament.big_fil ],axis=0)*(self.positions[:,0]<filament.length)
+            #self.on[:]= sum([(sum(self.positions[:,1:3]==fil,axis=1)==2)*(self.positions[:,0]<filament.length_fil[j]) for j,fil in enumerate(filament.big_fil)],axis=0)
             self.positions[self.on,:]-=self.displacement[self.on]
 
         return self.counts
@@ -247,9 +275,27 @@ class System:
 
 class Filament:
     """
-        Class containing the Filament
+        Class containing the Filaments
 
-        Reads config file and creates a filament.
+        a filament contains a set of sub-filaments
+
+        1 sub-filament :
+
+        X
+
+        2 sub-filaments :
+
+        X     or      X X
+        X
+
+        8 sub-filaments :
+
+        X X    or    X X X X
+        X X          X X X X
+        X X
+        X X
+
+        Where "X" denotes the location of a sub-filament (...)
     """
 
     # Constructor
@@ -268,25 +314,26 @@ class Filament:
                 made to rapidly compare monomer coordinates to filament coords in the YZ plane
                 in order to detect collisions
 
-            big_fil is a list of Nm x 3 arrays,
+            big_pos is a list of Nm x 3 arrays,
                 made to rapidly compare monomer coordinates the + tip position
                 in order to detect collisions
         """
 
         Nm=N_monomers
-        # Coords contain the coordinates of 'protofilaments',
+        # coords contain the coordinates of 'protofilaments',
         #   e.g. contiguous lines occupied by filaments
-        coords=self.make_coordinates()
+        # dir contains the orientation in the YZ plane
+        coords,dir=self.make_coordinates()
         # position in the YZ plane
         position=self.position
-        # Orientation in the YZ plane
-        dir=self.orientation
+        # length of filament
         length=self.length
         # XYZ position of the tip
         posis=[hstack((array([length],dtype=int16),position)),hstack((array([length],dtype=int16),position+dir))]
+
         # big_pos is to dectect collisions along the filament
         self.big_pos=[full((Nm, 1), 1, dtype=int16)*pos for pos in posis  ]
-        # big_pos is to dectect collisions at the tip and potential polymerization
+        # YZ containts the XY positions of single mini filaments
         self.YZ=[array(position+coord,dtype=int16) for coord in coords]
         self.big_fil=[full((Nm, 1), 1, dtype=int16)*yz  for yz  in self.YZ]
 
@@ -296,22 +343,29 @@ class Filament:
         dir=self.orientation
         if abs(sum(dir))==2:
             # DOUBLE RESOLUTION !
+            # Now assuming filament position is top left
             if abs(dir[0])>0:
                 for x in range(-1,4):
                     for y in range(-1,2):
                         coords.append([x,y])
+                dir=array([2,0])
             else:
                 for x in range(-1,2):
-                    for y in range(-1,4):
+                    for y in range(-3,2):
                         coords.append([x,y])
+                dir=array([0,-2])
         elif abs(sum(dir))==1:
             # Simple resolution, 1 filament = 2 protofilaments
+            if abs(dir[1])==1:
+                dir=array([0,-1])
+            else:
+                dir=array([1,0])
             coords.append([0,0])
             coords.append(dir)
         else:
             # Most likely single filaments
             coords.append(dir)
-        return array(coords,dtype=int16)
+        return array(coords,dtype=int16),dir
 
 
 def read_config(fname):
