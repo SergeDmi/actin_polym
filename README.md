@@ -4,9 +4,11 @@ A simple code to simulate actin monomer diffusion and reaction with filaments.
 ## Installation
 
 You need a working python environment. Then install pandas, numpy, and yaml :  
-$ pip3 install numpy --user
-$ pip3 install yaml --user
-$ pip3 install pandas --user
+```bash
+$ pip3 install numpy --user  
+$ pip3 install yaml --user  
+$ pip3 install pandas --user  
+```
 
 Then download actin_polymerization.py from this github repo.
 
