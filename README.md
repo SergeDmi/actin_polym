@@ -55,4 +55,4 @@ Values for orientation can be :
  [0,2] : vertical   
 
 
-# Serge Dmitrieff -- http://biophysics.fr
+### Serge Dmitrieff -- http://biophysics.fr
