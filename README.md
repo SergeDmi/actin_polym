@@ -14,7 +14,10 @@ Then download actin_polymerization.py from this github repo.
 
 ## Usage
 
-python3 actin_polymerization.py config.yaml
+Run actin_polymerization.py with a config file, e.g. :
+```shell
+$ python3 actin_polymerization.py config.yaml
+```
 
 ## Configuration files
 
