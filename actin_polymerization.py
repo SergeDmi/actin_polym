@@ -84,7 +84,7 @@ class Integrator:
     # Constructor
     def __init__(self,*args,fname='config.yaml'):
         self.config=read_config(fname)
-        self.system=System(*args,config=self.config)
+        self.system=System(*args,integrator=self,config=self.config)
 
     # Actual initializeation
     def initialize(self,*args,**kwargs):
@@ -92,29 +92,27 @@ class Integrator:
         # First initializing the system
         self.system.initialize(*args,**kwargs)
         random.seed(int(time.time()))
-
+        self.current_t=0
 
         # Now we prepare the integrator using info from the config file
         config_sim=self.config['simulation']
         self.Tmax=config_sim['Tmax']
         self.N_filaments=self.system.N_filaments
         self.counts=zeros((self.N_filaments,),dtype= uint32)
+        self.make_data_frame()
 
     # Here we actually integrate the system with time
     def do_simulation(self,*args,**kwargs):
         for t in range(self.Tmax):
+            self.current_t=t
             self.counts+=self.system.make_step()
 
-    # Saving result in csv format
-    def save_results(self,*args,out="res.csv",**kwargs):
-        # Results are stored in a dictionary
+    def make_results(self):
         results={}
         config_sim=self.config['simulation']
-
         # We record all the config values for the simulation
         for key in config_sim.keys():
             results[key]=config_sim[key]
-
         # We record all the config values for each filament
         for i,filament in enumerate(self.system.filaments):
             name=filament.name
@@ -122,15 +120,32 @@ class Integrator:
             conf=filament.config
             for key in conf.keys():
                 k='%s.%s' %(name,key)
-                results[k]=conf[key]
+                if key=="length":
+                    results[k]=filament.get_length_from_config()
+                    results['%s.final_%s' %(name,key)]="%s" %filament.length
+                else:
+                    results[k]=conf[key]
+        return results
 
+    # Creates a data frame to save results in
+    def make_data_frame(self):
+        results=self.make_results()
+        self.frame=pd.DataFrame(columns=results.keys())
+
+    # Saving result in csv format
+    def save_current_state(self,*args,out="res.csv",**kwargs):
+        # Results are stored in a dictionary
+        results=self.make_results()
         # We save it all in csv file format
-        frame=pd.DataFrame(columns=results.keys())
-        frame.loc['']=results
-        frame.to_csv(out)
+        self.frame.loc[self.current_t]=results
+
         return
 
 
+    def export_results(self,*args,out="res.csv",**kwargs):
+        # Results are stored in a dictionary
+        self.frame.to_csv(out)
+        return
 
 
 class System:
@@ -144,10 +159,11 @@ class System:
     """
 
     # Constructor
-    def __init__(self,*args,config=None,**kwargs):
+    def __init__(self,*args,config=None,integrator=None,**kwargs):
         if not config:
             raise ValueError('System cannot be initialized without a valid configuration')
 
+        self.integrator=integrator
         # Saving config in internal variables
         self.sim_config=config['simulation']
         self.fil_config=config['filaments']
@@ -156,6 +172,7 @@ class System:
         self.box=zeros((3,), dtype = int16)
         self.box_size=zeros((3,), dtype = int16)
 
+        self.dynamic_filaments=0
         return
 
     # Loads the configuration to internal variables
@@ -164,13 +181,17 @@ class System:
         fils=self.fil_config
         # Loading from parameters
         self.N_monomers=int(conf['N_monomers'])
-        self.filaments=[Filament(fils[key],name=key) for key in fils.keys()]
+        self.filaments=[Filament(fils[key],system=self,name=key) for key in fils.keys()]
         self.N_filaments=len(self.filaments)
         self.box[:]=conf['box']
         self.box_size[:]=self.box[:]+1
         self.success_frac=conf['success_frac']
         self.positions=zeros((0,3),dtype= int16)
         self.arange=arange(self.N_monomers)
+        try:
+            self.dynamic_filaments=conf['growing']
+        except:
+            self.dynamic_filaments=0
 
 
     def initialize(self,*args,**kwargs):
@@ -222,8 +243,7 @@ class System:
             pos[left,:]=hstack( (self.randcol_in(N=to_do,axis=0),self.randcol_in(N=to_do,axis=1),self.randcol_in(N=to_do,axis=2) ) )
             # we check if any monomer is on a filament
             for i,filament in enumerate(self.filaments):
-                for fil in filament.big_fil:
-                    on+=array(sum([sum(pos[left,1:3]==fil[left,:],axis=1)==2 for fil in filament.big_fil ],axis=0)*(pos[left,0]<filament.length),dtype=bool)
+                on[:]+=array( sum([ ( sum(pos[left,1:3]==sub_fil[left,:],axis=1)==2 )*( pos[left,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0) , dtype=bool)
             # we select monomers that are actually on a filament
             left=left[on]
             to_do=len(left)
@@ -248,15 +268,43 @@ class System:
 
         # Now collision and reaction detection for each filament
         for i,filament in enumerate(self.filaments):
-            # Reaction detection
-            self.on[:]=((sum(self.positions==filament.big_pos[0],axis=1)==3)+(sum(self.positions==filament.big_pos[1],axis=1)==3))*self.confirmed
-            N=sum(self.on)
-            self.positions[self.on,:]=self.random_position_inside(N=N)
-            self.counts[i]=N
+
             # Collision detection
-            self.on[:]= sum([sum(self.positions[:,1:3]==fil,axis=1)==2 for fil in filament.big_fil ],axis=0)*(self.positions[:,0]<filament.length)
+            self.on[:]= sum([ ( sum(self.positions[:,1:3]==sub_fil,axis=1)==2 )*( self.positions[:,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0)
             #self.on[:]= sum([(sum(self.positions[:,1:3]==fil,axis=1)==2)*(self.positions[:,0]<filament.length_fil[j]) for j,fil in enumerate(filament.big_fil)],axis=0)
+            # if collision, we cancel diffusion
             self.positions[self.on,:]-=self.displacement[self.on]
+
+
+
+            # Reaction detection
+            active=filament.reactive
+            self.on[:]=sum(self.positions==filament.big_pos[active],axis=1)==3
+            #b=filament.big_pos[active]
+            #print(b[0,:])
+            N=sum(self.on)
+
+            # We check if actual reaction, or fail
+            if self.success_frac<1:
+                self.on[:]*=random.binomial(1,self.success_frac,N)
+                N=sum(self.on)
+
+            self.counts[i]=N
+
+            if N>0:
+                if self.dynamic_filaments:
+                    # If filaments are dynamic, only a single polymerization event can happen at a given time
+                    N=1
+                    # If filaments are dynamic we make them grow !
+                    filament.add_length(N)
+                    ix=min(self.arange[self.on])
+                    # monomers that reacted are injected back in the solution
+                    self.positions[ix,:]=self.random_position_inside(N=N)
+                    # We check if reaction didn't cause new collisions. if so, we push monomers around
+                    self.on[:]= sum([ ( sum(self.positions[:,1:3]==sub_fil,axis=1)==2 )*( self.positions[:,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0)
+                    self.positions[self.on,1:3]+=filament.brick
+
+
 
         return self.counts
 
@@ -269,46 +317,64 @@ class System:
             j=int16(i)
             self.bool_container[:]=(self.int_container[:]==j)
             self.displacement[self.bool_container,i]=2*random.randint(2,size=(sum(self.bool_container),),dtype=int16)-1
-        if self.success_frac<1:
-            self.confirmed[:]=random.binomial(1,self.success_frac,self.N_monomers)
+        #if self.success_frac<1:
+        #    self.confirmed[:]=random.binomial(1,self.success_frac,self.N_monomers)
 
 
 class Filament:
     """
         Class containing the Filaments
 
-        a filament contains a set of sub-filaments
+        a filament contains a set of "sub-filaments" != proto-filaments
+        the set of sub-filaments correspond to space around the filament where monomers cannot be
 
-        1 sub-filament :
+        1 Proto-filament :
 
         X
 
-        2 sub-filaments :
+        2 Proto-filaments, grid size=monomer size : sub-filament = proto-filament
 
         X     or      X X
         X
 
-        8 sub-filaments :
+        2 Proto-filaments, grid size=monomer size/2
+            -> 15 sub-filaments
 
-        X X    or    X X X X
-        X X          X X X X
-        X X
-        X X
+        sub-filaments can be visualized as :
+        _ _ _         _ _ _ _ _
+        _ 0 X    or   _ 0 X 0 X
+        _ X X         _ X X X X
+        _ 0 X
+        _ X X
 
-        Where "X" denotes the location of a sub-filament (...)
+        Where "X", '_' and "0" denotes the locations of sub-filaments (...)
+        "0" denotes the subfilament to which monomer can react
+        "X" and "0" is where actin actually is
+        "_","X","0" are forbidden positions for monomers
+        A monomer looks something like this :
+        _ _ _
+        _ 0 X
+        _ X X
+
+
     """
 
     # Constructor
-    def __init__(self,config,name='filament',**kwarg):
+    def __init__(self,config,name='filament',system=None,**kwarg):
+        self.system=system
         self.config=config
         self.position=array(config['position'],dtype=int16)
         self.orientation=array(config['orientation'],dtype=int16)
-        self.length=int16(config['length'])
+        self.brick=max(abs(self.orientation))
+
+        self.length=self.get_length_from_config()
         self.name=name
+        self.reactive=self.get_reactive()
 
     # actual initialization
     def initialize(self,N_monomers=0,box=array([0,0,0]),**kwargs):
-        """ Here we initialize the filament coordinates
+        """
+            Here we initialize the filament coordinates
 
             big_fil is a list of Nm x 2 arrays,
                 made to rapidly compare monomer coordinates to filament coords in the YZ plane
@@ -325,20 +391,36 @@ class Filament:
         # dir contains the orientation in the YZ plane
         coords,dir=self.make_coordinates()
         # position in the YZ plane
+        #print("coords:")
+        #print(coords)
         position=self.position
         # length of filament
         length=self.length
+
         # XYZ position of the tip
-        posis=[hstack((array([length],dtype=int16),position)),hstack((array([length],dtype=int16),position+dir))]
+        posis=[hstack((array([length[0]],dtype=int16),position)),hstack((array([length[1]],dtype=int16),position+dir))]
 
         # big_pos is to dectect collisions along the filament
         self.big_pos=[full((Nm, 1), 1, dtype=int16)*pos for pos in posis  ]
         # YZ containts the XY positions of single mini filaments
         self.YZ=[array(position+coord,dtype=int16) for coord in coords]
+
+
         self.big_fil=[full((Nm, 1), 1, dtype=int16)*yz  for yz  in self.YZ]
+
+        # initiation with 0
+        self.sub_lengths=0.0*coords[:,0]
+        # fill in the sub lengths
+        self.update_lengths()
+
+        if self.system.dynamic_filaments:
+            self.system.integrator.save_current_state()
 
     # There we compute the position of the lines (along x) occupied by filaments
     def make_coordinates(self):
+        """
+            Here we make the coordinates of all sub-filaments of a given filament
+        """
         coords=[]
         dir=self.orientation
         if abs(sum(dir))==2:
@@ -350,8 +432,8 @@ class Filament:
                         coords.append([x,y])
                 dir=array([2,0])
             else:
-                for x in range(-1,2):
-                    for y in range(-3,2):
+                for y in range(-3,2):
+                    for x in range(-1,2):
                         coords.append([x,y])
                 dir=array([0,-2])
         elif abs(sum(dir))==1:
@@ -366,6 +448,71 @@ class Filament:
             # Most likely single filaments
             coords.append(dir)
         return array(coords,dtype=int16),dir
+
+    # finds out which end is reactive (the shortest is)
+    def get_reactive(self):
+        return int16(self.length[1]<self.length[0])
+
+    # Understanding the length as an array
+    def get_length_from_config(self):
+        config=self.config
+        if self.brick:
+            try:
+                length=array([int16(config['length']),int16(config['length'])],dtype=int16)
+            except:
+                try:
+                    length=array(config['length'],dtype=int16)
+                except:
+                    raise ValueError('Could not understand length from %s' % config['length'])
+            if length[0]==length[1]:
+                length[0]+=1
+        else:
+            try:
+                length=int16(config['length'])
+            except:
+                raise ValueError('Could not understand length from %s' % config['length'])
+        return length
+
+    def add_length(self,N):
+        self.length[self.reactive]+=N*self.brick
+        self.update_lengths()
+        self.system.integrator.save_current_state()
+        #print(self.length)
+
+    # update lengths of subfilaments
+    def update_lengths(self):
+        """
+            Here we update the length of sub filaments
+
+                Numerotation of sub filaments :
+
+                (vertical)          (horizontal)
+
+                12 13 14            2 5 8 11 14
+                9  10 11            1 4 7 10 13
+                6  7  8             0 3 6 9  12
+                3  4  5
+                0  1  2
+
+                So reaction can happen at sub-filaments 4 or 10.
+        """
+
+        self.reactive=self.get_reactive()
+
+        # The sub-filaments have different lengths
+        if self.brick<2:
+            self.sub_lengths=self.length
+        else:
+            # here it's important to remember that one protofilament is
+            if self.reactive==0:
+                self.sub_lengths[0:6]=self.length[0]
+                self.sub_lengths[6:]=self.length[1]
+            else:
+                self.sub_lengths[0:9]=self.length[0]
+                self.sub_lengths[9:] =self.length[1]
+
+        for i,pos in enumerate(self.big_pos):
+            pos[:,0]=self.length[i]
 
 
 def read_config(fname):
@@ -399,4 +546,5 @@ if __name__ == "__main__":
     integ.initialize()
     integ.do_simulation()
     # Also, saving is good
-    integ.save_results()
+    integ.save_current_state()
+    integ.export_results()
