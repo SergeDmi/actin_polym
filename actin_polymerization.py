@@ -4,7 +4,8 @@
 # Copyright Serge Dmitrieff
 # www.biophysics.fr
 
-from numpy import *
+#from numpy import *
+import numpy as np
 import sys
 import yaml
 import pandas as pd
@@ -70,7 +71,6 @@ __VERSION__ = "0.0.2"
 
 """
 
-
 def version():
     return __VERSION__
 
@@ -91,14 +91,14 @@ class Integrator:
         """ Initializes the integrator and the system """
         # First initializing the system
         self.system.initialize(*args,**kwargs)
-        random.seed(int(time.time()))
+        np.random.seed(int(time.time()))
         self.current_t=0
 
         # Now we prepare the integrator using info from the config file
         config_sim=self.config['simulation']
         self.Tmax=config_sim['Tmax']
         self.N_filaments=self.system.N_filaments
-        self.counts=zeros((self.N_filaments,),dtype= uint32)
+        self.counts=np.zeros((self.N_filaments,),dtype= np.uint32)
         self.make_data_frame()
 
     # Here we actually integrate the system with time
@@ -147,7 +147,6 @@ class Integrator:
         self.frame.to_csv(out)
         return
 
-
 class System:
     """
         Class containing the System
@@ -169,8 +168,8 @@ class System:
         self.fil_config=config['filaments']
 
         # Initializing boxes for convenience
-        self.box=zeros((3,), dtype = int16)
-        self.box_size=zeros((3,), dtype = int16)
+        self.box=np.zeros((3,), dtype = np.int16)
+        self.box_size=np.zeros((3,), dtype = np.int16)
 
         self.dynamic_filaments=0
         return
@@ -186,8 +185,8 @@ class System:
         self.box[:]=conf['box']
         self.box_size[:]=self.box[:]+1
         self.success_frac=conf['success_frac']
-        self.positions=zeros((0,3),dtype= int16)
-        self.arange=arange(self.N_monomers)
+        self.positions=np.zeros((0,3),dtype= np.int16)
+        self.arange=np.arange(self.N_monomers)
         try:
             self.dynamic_filaments=conf['growing']
         except:
@@ -207,24 +206,23 @@ class System:
             filament.initialize(N_monomers=Nm,box=box)
 
         # box, but vectorized to the number of monomers
-        self.big_box=full((Nm,1 ), 1, dtype=int16)*box
+        self.big_box=np.full((Nm,1 ), 1, dtype=np.int16)*box
 
         # bool containers for convenience
-        self.on=full((Nm, ), True, dtype=bool)
-        self.out=full((Nm, 3), True, dtype=bool)
-        self.bool_container=full((Nm, ), True, dtype=bool)
+        self.on=np.full((Nm, ), True, dtype=np.bool)
+        self.out=np.full((Nm, 3), True, dtype=np.bool)
+        self.bool_container=np.full((Nm, ), True, dtype=np.bool)
 
         #int container
-        self.int_container=ones((Nm,),dtype=int16);
+        self.int_container=np.ones((Nm,),dtype=np.int16);
 
         # Computing random positions, setting displacement to 0
-        self.confirmed=full((Nm, ), True, dtype=bool)
-        self.displacement=zeros((Nm,3),dtype=int16)
+        self.confirmed=np.full((Nm, ), True, dtype=np.bool)
+        self.displacement=np.zeros((Nm,3),dtype=np.int16)
         self.positions=self.random_position_inside(N=Nm)
 
         # setting counts to 0
-        self.counts=zeros((self.N_filaments,),dtype= uint32)
-
+        self.counts=np.zeros((self.N_filaments,),dtype= np.uint32)
 
     def random_position_inside(self,*args,N=1,**kwargs):
         # Returns an array of random positions inside the box !
@@ -233,17 +231,17 @@ class System:
         # probably not performance limiting
         done=0
         left=self.arange[0:N]
-        pos=zeros((N,3),dtype=int16)
+        pos=np.zeros((N,3),dtype=np.int16)
         to_do=N
 
         while to_do:
             # We assume no monomer is on a filament
-            on=full((to_do, ), False, dtype=bool)
+            on=np.full((to_do, ), False, dtype=np.bool)
             # We make random positions for monomers
-            pos[left,:]=hstack( (self.randcol_in(N=to_do,axis=0),self.randcol_in(N=to_do,axis=1),self.randcol_in(N=to_do,axis=2) ) )
+            pos[left,:]=np.hstack( (self.randcol_in(N=to_do,axis=0),self.randcol_in(N=to_do,axis=1),self.randcol_in(N=to_do,axis=2) ) )
             # we check if any monomer is on a filament
             for i,filament in enumerate(self.filaments):
-                on[:]+=array( sum([ ( sum(pos[left,1:3]==sub_fil[left,:],axis=1)==2 )*( pos[left,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0) , dtype=bool)
+                on[:]+=np.array( np.sum([ ( np.sum(pos[left,1:3]==sub_fil[left,:],axis=1)==2 )*( pos[left,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0) , dtype=np.bool)
             # we select monomers that are actually on a filament
             left=left[on]
             to_do=len(left)
@@ -253,7 +251,7 @@ class System:
 
     def randcol_in(self,N=1,axis=0):
         # Return a random of ints between 0 and box_size[axis]
-        return random.randint(self.box_size[axis],size=(N,1),dtype=int16)
+        return np.random.randint(self.box_size[axis],size=(N,1),dtype=np.int16)
 
     def make_step(self):
         # step step step step
@@ -270,7 +268,7 @@ class System:
         for i,filament in enumerate(self.filaments):
 
             # Collision detection
-            self.on[:]= sum([ ( sum(self.positions[:,1:3]==sub_fil,axis=1)==2 )*( self.positions[:,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0)
+            self.on[:]= np.sum([ ( np.sum(self.positions[:,1:3]==sub_fil,axis=1)==2 )*( self.positions[:,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0)
             #self.on[:]= sum([(sum(self.positions[:,1:3]==fil,axis=1)==2)*(self.positions[:,0]<filament.length_fil[j]) for j,fil in enumerate(filament.big_fil)],axis=0)
             # if collision, we cancel diffusion
             self.positions[self.on,:]-=self.displacement[self.on]
@@ -279,15 +277,15 @@ class System:
 
             # Reaction detection
             active=filament.reactive
-            self.on[:]=sum(self.positions==filament.big_pos[active],axis=1)==3
+            self.on[:]=np.sum(self.positions==filament.big_pos[active],axis=1)==3
             #b=filament.big_pos[active]
             #print(b[0,:])
-            N=sum(self.on)
+            N=np.sum(self.on)
 
             # We check if actual reaction, or fail
             if self.success_frac<1:
-                self.on[:]*=random.binomial(1,self.success_frac,N)
-                N=sum(self.on)
+                self.on[:]*=np.random.binomial(1,self.success_frac,N)
+                N=np.sum(self.on)
 
             self.counts[i]=N
 
@@ -301,25 +299,23 @@ class System:
                     # monomers that reacted are injected back in the solution
                     self.positions[ix,:]=self.random_position_inside(N=N)
                     # We check if reaction didn't cause new collisions. if so, we push monomers around
-                    self.on[:]= sum([ ( sum(self.positions[:,1:3]==sub_fil,axis=1)==2 )*( self.positions[:,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0)
+                    self.on[:]= np.sum([ ( np.sum(self.positions[:,1:3]==sub_fil,axis=1)==2 )*( self.positions[:,0] < filament.sub_lengths[j] ) for j,sub_fil in enumerate(filament.big_fil) ],axis=0)
                     self.positions[self.on,1:3]+=filament.brick
 
 
 
         return self.counts
 
-
     def compute_random_step(self):
         # Here we compute the random variables
         self.displacement.fill(0)
-        self.int_container[:]=random.randint(3,size=(self.N_monomers,),dtype=int16)
+        self.int_container[:]=np.random.randint(3,size=(self.N_monomers,),dtype=np.int16)
         for i in range(3):
-            j=int16(i)
+            j=np.int16(i)
             self.bool_container[:]=(self.int_container[:]==j)
-            self.displacement[self.bool_container,i]=2*random.randint(2,size=(sum(self.bool_container),),dtype=int16)-1
+            self.displacement[self.bool_container,i]=2*np.random.randint(2,size=(np.sum(self.bool_container),),dtype=np.int16)-1
         #if self.success_frac<1:
         #    self.confirmed[:]=random.binomial(1,self.success_frac,self.N_monomers)
-
 
 class Filament:
     """
@@ -363,8 +359,8 @@ class Filament:
     def __init__(self,config,name='filament',system=None,**kwarg):
         self.system=system
         self.config=config
-        self.position=array(config['position'],dtype=int16)
-        self.orientation=array(config['orientation'],dtype=int16)
+        self.position=np.array(config['position'],dtype=np.int16)
+        self.orientation=np.array(config['orientation'],dtype=np.int16)
         self.brick=max(abs(self.orientation))
 
         self.length=self.get_length_from_config()
@@ -372,7 +368,7 @@ class Filament:
         self.reactive=self.get_reactive()
 
     # actual initialization
-    def initialize(self,N_monomers=0,box=array([0,0,0]),**kwargs):
+    def initialize(self,N_monomers=0,box=np.array([0,0,0]),**kwargs):
         """
             Here we initialize the filament coordinates
 
@@ -398,15 +394,15 @@ class Filament:
         length=self.length
 
         # XYZ position of the tip
-        posis=[hstack((array([length[0]],dtype=int16),position)),hstack((array([length[1]],dtype=int16),position+dir))]
+        posis=[np.hstack((np.array([length[0]],dtype=np.int16),position)),np.hstack((np.array([length[1]],dtype=np.int16),position+dir))]
 
         # big_pos is to dectect collisions along the filament
-        self.big_pos=[full((Nm, 1), 1, dtype=int16)*pos for pos in posis  ]
+        self.big_pos=[np.full((Nm, 1), 1, dtype=np.int16)*pos for pos in posis  ]
         # YZ containts the XY positions of single mini filaments
-        self.YZ=[array(position+coord,dtype=int16) for coord in coords]
+        self.YZ=[np.array(position+coord,dtype=np.int16) for coord in coords]
 
 
-        self.big_fil=[full((Nm, 1), 1, dtype=int16)*yz  for yz  in self.YZ]
+        self.big_fil=[np.full((Nm, 1), 1, dtype=np.int16)*yz  for yz  in self.YZ]
 
         # initiation with 0
         self.sub_lengths=0.0*coords[:,0]
@@ -423,52 +419,52 @@ class Filament:
         """
         coords=[]
         dir=self.orientation
-        if abs(sum(dir))==2:
+        if abs(np.sum(dir))==2:
             # DOUBLE RESOLUTION !
             # Now assuming filament position is top left
             if abs(dir[0])>0:
                 for x in range(-1,4):
                     for y in range(-1,2):
                         coords.append([x,y])
-                dir=array([2,0])
+                dir=np.array([2,0])
             else:
                 for y in range(-3,2):
                     for x in range(-1,2):
                         coords.append([x,y])
-                dir=array([0,-2])
-        elif abs(sum(dir))==1:
+                dir=np.array([0,-2])
+        elif abs(np.sum(dir))==1:
             # Simple resolution, 1 filament = 2 protofilaments
             if abs(dir[1])==1:
-                dir=array([0,-1])
+                dir=np.array([0,-1])
             else:
-                dir=array([1,0])
+                dir=np.array([1,0])
             coords.append([0,0])
             coords.append(dir)
         else:
             # Most likely single filaments
             coords.append(dir)
-        return array(coords,dtype=int16),dir
+        return np.array(coords,dtype=np.int16),dir
 
     # finds out which end is reactive (the shortest is)
     def get_reactive(self):
-        return int16(self.length[1]<self.length[0])
+        return np.int16(self.length[1]<self.length[0])
 
     # Understanding the length as an array
     def get_length_from_config(self):
         config=self.config
         if self.brick:
             try:
-                length=array([int16(config['length']),int16(config['length'])],dtype=int16)
+                length=np.array([np.int16(config['length']),np.int16(config['length'])],dtype=np.int16)
             except:
                 try:
-                    length=array(config['length'],dtype=int16)
+                    length=np.array(config['length'],dtype=np.int16)
                 except:
                     raise ValueError('Could not understand length from %s' % config['length'])
             if length[0]==length[1]:
                 length[0]+=1
         else:
             try:
-                length=int16(config['length'])
+                length=np.int16(config['length'])
             except:
                 raise ValueError('Could not understand length from %s' % config['length'])
         return length
